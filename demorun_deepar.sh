@@ -13,4 +13,8 @@ uv python install 3.12
 uv python pin 3.12
 uv sync
 
+cd extensions/kernels
+uv run python setup.py install
+cd ../..
+
 uv run python -m example_deepar --d_model 256 --context_length 864 --weight_decay 0.0
