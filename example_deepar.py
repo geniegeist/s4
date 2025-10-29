@@ -27,6 +27,7 @@ import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 from torch.distributions import NegativeBinomial
+import wandb
 
 import os
 import argparse
@@ -69,12 +70,19 @@ parser.add_argument('--model', default='s4', choices=['s4', 's4d'], type=str)
 parser.add_argument('--context_length', default=864, type=int)
 # General
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
+parser.add_argument('--run', type=str)
 
 args = parser.parse_args()
 
+# Params
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_val_loss = float('inf') # best validation loss
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+val_split = 0.1
+
+config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
+user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
+wandb_run = wandb.init(project='deepars4', name=args.run, config=user_config)
 
 # Data
 print(f'==> Preparing data..')
@@ -83,7 +91,6 @@ timeseries = torch.load('timeseries.pt')
 tile_features = torch.load('tile_ft.pt')
 time_covariates = torch.load('time_ft.pt')
 
-val_split = 0.1
 d_input = 1 + tile_features.shape[1] + time_covariates.shape[1]
 
 time_len = int(timeseries.shape[1] * (1 - val_split))
@@ -141,7 +148,7 @@ class DeepARS4(nn.Module):
         for _ in range(n_layers):
             assert args.model in ['s4', 's4d'], "Invalid args.model"
             self.s4_layers.append(
-                S4(d_model=d_model, bidirectional=False, l_max=1024, final_act="glu", dropout=dropout, transposed=False)
+                S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False)
                 if args.model == 's4' else
                 S4D(d_model, dropout=dropout, transposed=False, lr=min(0.001, args.lr))
             )
@@ -276,7 +283,7 @@ optimizer, scheduler = setup_optimizer(
 ###############################################################################
 
 # Training
-def train():
+def train(epoch: int, val_every: int = 1000):
     model.train()
     train_loss = 0
     pbar = tqdm(enumerate(trainloader))
@@ -291,10 +298,19 @@ def train():
         train_loss += loss.item()
 
         pbar.set_description(
-            'Batch Idx: (%d/%d) | Loss: %.3f | MAE: %.3f' %
+            'Batch Idx: (%d/%d) | Train loss: %.3f | MAE: %.3f' %
             (batch_idx, len(trainloader), train_loss/(batch_idx+1), torch.mean(torch.abs(mu - targets)))
         )
 
+        # once in a while: evaluate validation
+        if batch_idx % val_every == 0:
+            avg_val_loss = eval(epoch, valloader, checkpoint=True)
+            wandb_run.log({
+                "epoch": epoch,
+                "batch_idx": batch_idx,
+                "avg_val_loss": avg_val_loss,
+            })
+            model.train()
 
 def eval(epoch, dataloader, checkpoint=False):
     global best_val_loss
@@ -311,7 +327,7 @@ def eval(epoch, dataloader, checkpoint=False):
             eval_loss += loss.item()
 
             pbar.set_description(
-                'Batch Idx: (%d/%d) | Loss: %.3f | MAE: %.3f' %
+                'Batch Idx: (%d/%d) | Val loss: %.3f | MAE: %.3f' %
                 (batch_idx, len(dataloader), eval_loss/(batch_idx+1), torch.mean(torch.abs(mu - targets)))
             )
 
@@ -330,7 +346,7 @@ def eval(epoch, dataloader, checkpoint=False):
             torch.save(state, './checkpoint/ckpt.pth')
             best_val_loss = avg_eval_loss
 
-        return avg_eval_loss
+    return avg_eval_loss
 
 avg_eval_loss = 0
 pbar = tqdm(range(start_epoch, args.epochs))
@@ -339,8 +355,9 @@ for epoch in pbar:
         pbar.set_description('Epoch: %d' % (epoch))
     else:
         pbar.set_description('Epoch: %d | Avg eval loss: %.3f' % (epoch, avg_eval_loss))
-    train()
+    train(epoch, val_every=1000)
     avg_eval_loss = eval(epoch, valloader, checkpoint=True)
     scheduler.step()
     # print(f"Epoch {epoch} learning rate: {scheduler.get_last_lr()}")
 
+wandb_run.finish()
