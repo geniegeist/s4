@@ -77,7 +77,7 @@ best_val_loss = float('inf') # best validation loss
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
 # Data
-print(f'==> Preparing {args.dataset} data..')
+print(f'==> Preparing data..')
 
 timeseries = torch.load('timeseries.pt')
 tile_features = torch.load('tile_ft.pt')
