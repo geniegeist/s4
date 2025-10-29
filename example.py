@@ -65,6 +65,7 @@ parser.add_argument('--n_layers', default=4, type=int, help='Number of layers')
 parser.add_argument('--d_model', default=128, type=int, help='Model dimension')
 parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
 parser.add_argument('--prenorm', action='store_true', help='Prenorm')
+parser.add_argument('--model', default='s4', choices=['s4', 's4d'], type=str)
 # General
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 
@@ -173,7 +174,10 @@ class S4Model(nn.Module):
         self.norms = nn.ModuleList()
         self.dropouts = nn.ModuleList()
         for _ in range(n_layers):
+            assert args.model in ['s4', 's4d'], "Invalid args.model"
             self.s4_layers.append(
+                S4(d_model=d_model, bidirectional=True, l_max=1024, final_act="glu", dropout=dropout, transposed=True)
+                if args.model == 's4' else
                 S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001, args.lr))
             )
             self.norms.append(nn.LayerNorm(d_model))
