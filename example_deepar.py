@@ -55,7 +55,7 @@ parser.add_argument('--lr', default=0.01, type=float, help='Learning rate')
 parser.add_argument('--weight_decay', default=0.01, type=float, help='Weight decay')
 # Scheduler
 # parser.add_argument('--patience', default=10, type=float, help='Patience for learning rate scheduler')
-parser.add_argument('--epochs', default=10, type=float, help='Training epochs')
+parser.add_argument('--epochs', default=10, type=int, help='Training epochs')
 # Dataset
 parser.add_argument('--grayscale', action='store_true', help='Use grayscale CIFAR10')
 # Dataloader
@@ -320,9 +320,8 @@ def eval(epoch, dataloader, checkpoint=False):
         pbar = tqdm(enumerate(dataloader))
         for batch_idx, (inputs, targets) in pbar:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            mu, _ = outputs
-            loss = criterion(outputs, targets)
+            mu, alpha = model(inputs)
+            loss = criterion(mu, alpha, targets)
 
             eval_loss += loss.item()
 
