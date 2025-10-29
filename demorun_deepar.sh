@@ -32,4 +32,4 @@ cd ../..
 
 # -----------------------------------------------------------------------------
 # Start training
-uv run python -m example_deepar --d_model 256 --context_length 2976 --batch_size 512 --weight_decay 0.0 --num_workers 0 --epochs 1
+uv run python -m example_deepar --d_model 256 --context_length 1440 --batch_size 512 --weight_decay 0.0 --num_workers 0 --epochs 1
