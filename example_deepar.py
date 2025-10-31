@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
+from torch.utils.data import DataLoader, WeightedRandomSampler
 import wandb
 
 import os
@@ -96,13 +97,16 @@ valset = TimeseriesDataset(
     context_length=args.context_length
 )
 
+avg_counts = timeseries_train.mean(dim=(1, 2)) # shape: (batch,)
+weights = 1.0 + avg_counts * 0.33
+weights = weights / weights.sum()
+sampler = WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
+
 # Dataloaders
-trainloader = torch.utils.data.DataLoader(
-    trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-valloader = torch.utils.data.DataLoader(
+trainloader = DataLoader(
+    trainset, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
+valloader = DataLoader(
     valset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-
-
 
 # Model
 print('==> Building model..')
@@ -183,9 +187,10 @@ optimizer, scheduler = setup_optimizer(
 ###############################################################################
 
 # Training
-def train(epoch: int, val_every: int = 1000):
+def train(epoch: int, val_every: int = 10000):
     model.train()
     train_loss = 0
+    mae = 0
     pbar = tqdm(enumerate(trainloader))
     for batch_idx, (inputs, targets) in pbar:
         inputs, targets = inputs.to(device), targets.to(device)
@@ -196,19 +201,29 @@ def train(epoch: int, val_every: int = 1000):
         optimizer.step()
 
         train_loss += loss.item()
+        mae += torch.mean(torch.abs(mu - targets)).item()
 
         pbar.set_description(
             'Batch Idx: (%d/%d) | Train loss: %.3f | MAE: %.3f' %
-            (batch_idx, len(trainloader), train_loss/(batch_idx+1), torch.mean(torch.abs(mu - targets)))
+            (batch_idx, len(trainloader), train_loss/(batch_idx+1), mae / (batch_idx+1))
         )
+        
+        if batch_idx % 1000 == 0:
+            wandb_run.log({
+                "epoch": epoch,
+                "batch_idx": batch_idx,
+                "train_loss": train_loss/(batch_idx+1),
+                "mae": mae / (batch_idx+1),
+            })
 
         # once in a while: evaluate validation
         if batch_idx % val_every == 0:
-            avg_val_loss = eval(epoch, valloader, checkpoint=True)
+            avg_val_loss, avg_mae = eval(epoch, valloader, checkpoint=True)
             wandb_run.log({
                 "epoch": epoch,
                 "batch_idx": batch_idx,
                 "avg_val_loss": avg_val_loss,
+                "avg_mae": avg_mae,
             })
             model.train()
 
@@ -216,6 +231,7 @@ def eval(epoch, dataloader, checkpoint=False):
     global best_val_loss
     model.eval()
     eval_loss = 0
+    mae = 0
     with torch.no_grad():
         pbar = tqdm(enumerate(dataloader))
         for batch_idx, (inputs, targets) in pbar:
@@ -224,13 +240,15 @@ def eval(epoch, dataloader, checkpoint=False):
             loss = criterion(mu, alpha, targets)
 
             eval_loss += loss.item()
+            mae += torch.mean(torch.abs(mu - targets)).item()
 
             pbar.set_description(
                 'Batch Idx: (%d/%d) | Val loss: %.3f | MAE: %.3f' %
-                (batch_idx, len(dataloader), eval_loss/(batch_idx+1), torch.mean(torch.abs(mu - targets)))
+                (batch_idx, len(dataloader), eval_loss/(batch_idx+1), mae/(batch_idx+1))
             )
 
     avg_eval_loss = eval_loss / len(dataloader)
+    avg_mae = mae / len(dataloader)
 
     # Save checkpoint.
     if checkpoint:
@@ -238,6 +256,7 @@ def eval(epoch, dataloader, checkpoint=False):
             state = {
                 'model': model.state_dict(),
                 'avg_loss': avg_eval_loss,
+                'avg_mae': avg_mae,
                 'epoch': epoch,
             }
             if not os.path.isdir('checkpoint'):
@@ -245,17 +264,19 @@ def eval(epoch, dataloader, checkpoint=False):
             torch.save(state, './checkpoint/ckpt.pth')
             best_val_loss = avg_eval_loss
 
-    return avg_eval_loss
+    return avg_eval_loss, avg_mae
 
 avg_eval_loss = 0
+avg_mae = 0
+wandb_run.watch(model)
 pbar = tqdm(range(start_epoch, args.epochs))
 for epoch in pbar:
     if epoch == 0:
         pbar.set_description('Epoch: %d' % (epoch))
     else:
-        pbar.set_description('Epoch: %d | Avg eval loss: %.3f' % (epoch, avg_eval_loss))
-    train(epoch, val_every=1000)
-    avg_eval_loss = eval(epoch, valloader, checkpoint=True)
+        pbar.set_description('Epoch: %d | Avg eval loss: %.3f | MAE: %.3f' % (epoch, avg_eval_loss, avg_mae))
+    train(epoch, val_every=10000)
+    avg_eval_loss, avg_mae = eval(epoch, valloader, checkpoint=True)
     scheduler.step()
     # print(f"Epoch {epoch} learning rate: {scheduler.get_last_lr()}")
 
