@@ -97,14 +97,9 @@ valset = TimeseriesDataset(
     context_length=args.context_length
 )
 
-avg_counts = timeseries_train.mean(dim=(1, 2)) # shape: (batch,)
-weights = 1.0 + avg_counts * 0.33
-weights = weights / weights.sum()
-sampler = WeightedRandomSampler(weights=weights, num_samples=len(weights), replacement=True)
-
 # Dataloaders
 trainloader = DataLoader(
-    trainset, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
+    trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 valloader = DataLoader(
     valset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
@@ -116,6 +111,7 @@ model = DeepARS4(
     n_layers=args.n_layers,
     dropout=args.dropout,
     prenorm=args.prenorm,
+    lr=0.0001
 )
 
 model = model.to(device)
@@ -142,6 +138,8 @@ def setup_optimizer(model, lr, weight_decay, epochs):
     and weight decay (if desired).
     """
 
+    num_steps = len(trainloader) * args.epochs
+
     # All parameters in the model
     all_parameters = list(model.parameters())
 
@@ -164,7 +162,7 @@ def setup_optimizer(model, lr, weight_decay, epochs):
 
     # Create a lr scheduler
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=patience, factor=0.2)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
 
     # Print optimizer info
     keys = sorted(set([k for hp in hps for k in hp.keys()]))
@@ -199,25 +197,33 @@ def train(epoch: int, val_every: int = 10000):
         loss = criterion(mu, alpha, targets)
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         train_loss += loss.item()
         mae += torch.mean(torch.abs(mu - targets)).item()
 
         pbar.set_description(
-            'Batch Idx: (%d/%d) | Train loss: %.3f | MAE: %.3f' %
-            (batch_idx, len(trainloader), train_loss/(batch_idx+1), mae / (batch_idx+1))
+            'Batch Idx: (%d/%d) | Train loss: %.3f | Train loss cur: %.3f | MAE: %.3f | MAE cur: %.3f' %
+            (batch_idx, len(trainloader), train_loss/(batch_idx+1), loss.item(),  mae / (batch_idx+1), mae)
         )
         
-        if batch_idx % 1000 == 0:
+        if batch_idx % 100 == 0:
             wandb_run.log({
                 "epoch": epoch,
                 "batch_idx": batch_idx,
                 "train_loss": train_loss/(batch_idx+1),
                 "mae": mae / (batch_idx+1),
             })
+            state = {
+                'model': model.state_dict(),
+                'epoch': epoch,
+            }
+            if not os.path.isdir('checkpoint'):
+                os.mkdir('checkpoint')
+            torch.save(state, './checkpoint/ckpt.pth')
 
         # once in a while: evaluate validation
-        if batch_idx % val_every == 0:
+        if batch_idx % val_every == 0 and batch_idx > 0:
             avg_val_loss, avg_mae = eval(epoch, valloader, checkpoint=True)
             wandb_run.log({
                 "epoch": epoch,
