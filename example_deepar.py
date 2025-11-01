@@ -32,6 +32,7 @@ import os
 import argparse
 
 from models.s4.deepars4 import DeepARS4, NegativeBinomialNLL
+from models.s4.deepar import DeepAR
 from dataset import TimeseriesDataset
 
 from tqdm.auto import tqdm
@@ -105,13 +106,21 @@ valloader = DataLoader(
 
 # Model
 print('==> Building model..')
-model = DeepARS4(
-    d_input=d_input,
-    d_model=args.d_model,
-    n_layers=args.n_layers,
-    dropout=args.dropout,
-    prenorm=args.prenorm,
-    lr=0.0001
+# model = DeepARS4(
+#     d_input=d_input,
+#     d_model=args.d_model,
+#     n_layers=args.n_layers,
+#     dropout=args.dropout,
+#     prenorm=args.prenorm,
+#     lr=0.0001
+# )
+
+model = DeepAR(
+    input_size=d_input,
+    hidden_size=args.d_model,
+    num_layers=args.n_layers,
+    dropout_rate=args.dropout,
+    scaled = False
 )
 
 model = model.to(device)
@@ -124,8 +133,6 @@ if args.resume:
     assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
     checkpoint = torch.load('./checkpoint/ckpt.pth')
     model.load_state_dict(checkpoint['model'])
-    best_val_loss = checkpoint['avg_loss']
-    start_epoch = checkpoint['epoch']
 
 def setup_optimizer(model, lr, weight_decay, epochs):
     """
