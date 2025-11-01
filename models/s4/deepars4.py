@@ -51,7 +51,7 @@ class DeepARS4(nn.Module):
                 S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False, **layer_args)
                 #S4D(d_model, dropout=dropout, transposed=False, lr=min(0.001, lr))
             )
-            self.norms.append(nn.RMSNorm(d_model))
+            self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
 
         # Linear decoder
