@@ -54,12 +54,6 @@ class DeepARS4(nn.Module):
             self.norms.append(nn.RMSNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
 
-        self.post = nn.Sequential(
-            nn.RMSNorm(d_model),
-            nn.Linear(d_model, 2*d_model),
-            nn.SiLU(),
-            nn.Linear(2*d_model, d_model)
-        )
         # Linear decoder
         self.decoder_mu = nn.Linear(d_model, 1)
         self.decoder_alpha = nn.Linear(d_model, 1)
@@ -91,8 +85,6 @@ class DeepARS4(nn.Module):
                 # Postnorm
                 x = norm(x)
 
-
-        x = self.post(x)
 
         # Decode the outputs
         mu = F.softplus(self.decoder_mu(x))  # (B, L, d_model) -> (B, L, 1)
