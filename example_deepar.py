@@ -98,29 +98,42 @@ valset = TimeseriesDataset(
     context_length=args.context_length
 )
 
+
+# Compute per-sample weights based on windowed averages
+avg_counts_per_sample = []
+
+for i in tqdm(range(len(trainset)), desc="Computing average counts"):
+    window, *_ = trainset[i]  # assuming first returned element is the timeseries slice
+    avg_count = window.mean().item()
+    avg_counts_per_sample.append(avg_count)
+
+avg_counts_per_sample = torch.tensor(avg_counts_per_sample)
+
+# Slight weighting — use gentle scaling
+weights = 1.0 + avg_counts_per_sample * 1
+weights = weights / weights.sum()
+
+sampler = WeightedRandomSampler(
+    weights=weights,
+    num_samples=len(weights),
+    replacement=True
+)
+
 # Dataloaders
 trainloader = DataLoader(
-    trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    trainset, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
 valloader = DataLoader(
     valset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
 # Model
 print('==> Building model..')
-# model = DeepARS4(
-#     d_input=d_input,
-#     d_model=args.d_model,
-#     n_layers=args.n_layers,
-#     dropout=args.dropout,
-#     prenorm=args.prenorm,
-#     lr=0.0001
-# )
-
-model = DeepAR(
-    input_size=d_input,
-    hidden_size=args.d_model,
-    num_layers=args.n_layers,
-    dropout_rate=args.dropout,
-    scaled = False
+model = DeepARS4(
+    d_input=d_input,
+    d_model=args.d_model,
+    n_layers=args.n_layers,
+    dropout=args.dropout,
+    prenorm=args.prenorm,
+    lr=0.0001
 )
 
 model = model.to(device)
