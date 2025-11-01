@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.distributions import NegativeBinomial
 
 from models.s4.s4 import S4Block as S4
+from models.s4.s4d import S4D
 
 # Dropout broke in PyTorch 1.11
 if tuple(map(int, torch.__version__.split('.')[:2])) == (1, 11):
@@ -23,6 +24,7 @@ class DeepARS4(nn.Module):
         n_layers: int = 4,
         dropout: float = 0.2,
         prenorm: bool = False,
+        lr = 0.001,
         **layer_args,
     ):
         """
@@ -46,11 +48,18 @@ class DeepARS4(nn.Module):
         self.dropouts = nn.ModuleList()
         for _ in range(n_layers):
             self.s4_layers.append(
-                S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False, layer_args=layer_args)
+                S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False, **layer_args)
+                #S4D(d_model, dropout=dropout, transposed=False, lr=min(0.001, lr))
             )
-            self.norms.append(nn.LayerNorm(d_model))
+            self.norms.append(nn.RMSNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))
 
+        self.post = nn.Sequential(
+            nn.RMSNorm(d_model),
+            nn.Linear(d_model, 2*d_model),
+            nn.SiLU(),
+            nn.Linear(2*d_model, d_model)
+        )
         # Linear decoder
         self.decoder_mu = nn.Linear(d_model, 1)
         self.decoder_alpha = nn.Linear(d_model, 1)
@@ -81,6 +90,9 @@ class DeepARS4(nn.Module):
             if not self.prenorm:
                 # Postnorm
                 x = norm(x)
+
+
+        x = self.post(x)
 
         # Decode the outputs
         mu = F.softplus(self.decoder_mu(x))  # (B, L, d_model) -> (B, L, 1)
