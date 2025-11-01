@@ -196,15 +196,19 @@ def train(epoch: int, val_every: int = 10000):
         mu, alpha = model(inputs)
         loss = criterion(mu, alpha, targets)
         loss.backward()
+
+        #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
         scheduler.step()
 
         train_loss += loss.item()
-        mae += torch.mean(torch.abs(mu - targets)).item()
+        mae_delta = torch.mean(torch.abs(mu - targets)).item()
+        mae += mae_delta
 
         pbar.set_description(
             'Batch Idx: (%d/%d) | Train loss: %.3f | Train loss cur: %.3f | MAE: %.3f | MAE cur: %.3f' %
-            (batch_idx, len(trainloader), train_loss/(batch_idx+1), loss.item(),  mae / (batch_idx+1), mae)
+            (batch_idx, len(trainloader), train_loss/(batch_idx+1), loss.item(),  mae / (batch_idx+1), mae_delta)
         )
         
         if batch_idx % 100 == 0:
