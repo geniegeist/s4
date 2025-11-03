@@ -13,11 +13,13 @@ class TimeseriesDataset(torch.utils.data.Dataset):
         tile_features: torch.Tensor,
         time_covariates: torch.Tensor,
         context_length: int,
+        features: torch.Tensor | None = None, 
     ):
         self.data = data
         self.tile_features = tile_features
         self.time_covariates = time_covariates
         self.num_h3_cells, self.num_time_steps = data.shape
+        self.features = features
         self.context_length = context_length
 
     def __len__(self):
@@ -38,6 +40,7 @@ class TimeseriesDataset(torch.utils.data.Dataset):
         start = self.get_start_time_idx(idx)
         #obs = self.data[:, start:start+self.context_length]
         obs = self.data[h3_idx, start:start+self.context_length]
+
         #targets = self.data[:, start+1:start+self.context_length+1]
         targets = self.data[h3_idx, start+1:start+self.context_length+1]
         tile_features = self.tile_features[h3_idx].expand(obs.size(0), -1)
@@ -46,11 +49,15 @@ class TimeseriesDataset(torch.utils.data.Dataset):
         obs = obs.unsqueeze(-1)
         targets = targets.unsqueeze(-1)
 
-        obs = torch.concat([
-            obs,
-            tile_features,
-            time_covariates,
-        ], dim=1)
+        features = None
+        if self.features:
+            features = self.features[h3_idx, start:start+self.context_length]
+            features = features.unsqueeze(-1)
+
+        parts = [obs, tile_features, time_covariates]
+        if features is not None:
+            parts.append(features)
+        obs = torch.concat(parts, dim=1)
 
         return obs, targets
 
