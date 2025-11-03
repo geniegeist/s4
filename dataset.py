@@ -50,7 +50,7 @@ class TimeseriesDataset(torch.utils.data.Dataset):
         targets = targets.unsqueeze(-1)
 
         features = None
-        if self.features:
+        if self.features is not None:
             features = self.features[h3_idx, start:start+self.context_length]
             features = features.unsqueeze(-1)
 
