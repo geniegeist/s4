@@ -48,7 +48,7 @@ class DeepARS4(nn.Module):
         self.dropouts = nn.ModuleList()
         for _ in range(n_layers):
             self.s4_layers.append(
-                S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False, **layer_args)
+                S4(d_model=d_model, bidirectional=False, l_max=3000, final_act="glu", dropout=dropout, transposed=False, lr=lr, **layer_args)
                 #S4D(d_model, dropout=dropout, transposed=False, lr=min(0.001, lr))
             )
             self.norms.append(nn.LayerNorm(d_model))
