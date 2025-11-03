@@ -40,12 +40,13 @@ from tqdm.auto import tqdm
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 # Optimizer
 parser.add_argument('--lr', default=0.01, type=float, help='Learning rate')
+parser.add_argument('--kernel_lr', default=0.001, type=float, help='Learning rate')
 parser.add_argument('--weight_decay', default=0.01, type=float, help='Weight decay')
 # Scheduler
 # parser.add_argument('--patience', default=10, type=float, help='Patience for learning rate scheduler')
 parser.add_argument('--epochs', default=10, type=int, help='Training epochs')
 # Dataset
-parser.add_argument('--grayscale', action='store_true', help='Use grayscale CIFAR10')
+parser.add_argument('--data_dir', type=str)
 # Dataloader
 parser.add_argument('--num_workers', default=4, type=int, help='Number of workers to use for dataloader')
 parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
@@ -58,70 +59,55 @@ parser.add_argument('--model', default='s4', choices=['s4', 's4d'], type=str)
 parser.add_argument('--context_length', default=864, type=int)
 # General
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
-parser.add_argument('--run', type=str)
+parser.add_argument('--run_name', type=str, help='Run name for wandb')
 
 args = parser.parse_args()
 
 # Params
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f'Detected device: {device}')
+
 best_val_loss = float('inf') # best validation loss
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 val_split = 0.1
 
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 user_config = {k: globals()[k] for k in config_keys} # will be useful for logging
-wandb_run = wandb.init(project='deepars4', name=args.run, config=user_config)
+wandb_run = wandb.init(project='deepars4', name=args.run_name, config=user_config)
 
 # Data
 print(f'==> Preparing data..')
 
-timeseries = torch.load('timeseries.pt')
-tile_features = torch.load('tile_ft.pt')
-time_covariates = torch.load('time_ft.pt')
+timeseries = torch.load(args.data_dir + '/timeseries.pt')
+tile_features = torch.load(args.data_dir + '/tile_ft.pt')
+time_covariates = torch.load(args.data_dir + '/time_ft.pt')
+features = torch.load(args.data_dir + '/features.pt')
 
-d_input = 1 + tile_features.shape[1] + time_covariates.shape[1]
+d_input = 1 + tile_features.shape[1] + time_covariates.shape[1] + features.shape[2]
 
 time_len = int(timeseries.shape[1] * (1 - val_split))
 timeseries_train, timeseries_val = timeseries[:,:time_len], timeseries[:,time_len:]
 time_covariates_train, time_covariates_val = time_covariates[:time_len], time_covariates[time_len:]
+features_train, features_val = features[:,:time_len], features[:,time_len:]
 
 trainset = TimeseriesDataset(
     data=timeseries_train, 
     tile_features=tile_features, 
     time_covariates=time_covariates_train,
+    features=features_train,
     context_length=args.context_length
 )
 valset = TimeseriesDataset(
     data=timeseries_val, 
     tile_features=tile_features, 
     time_covariates=time_covariates_val,
+    features=features_val,
     context_length=args.context_length
-)
-
-
-# Compute per-sample weights based on windowed averages
-avg_counts_per_sample = []
-
-for i in tqdm(range(len(trainset)), desc="Computing average counts"):
-    window, *_ = trainset[i]  # assuming first returned element is the timeseries slice
-    avg_count = window.mean().item()
-    avg_counts_per_sample.append(avg_count)
-
-avg_counts_per_sample = torch.tensor(avg_counts_per_sample)
-
-# Slight weighting — use gentle scaling
-weights = 1.0 + avg_counts_per_sample * 1
-weights = weights / weights.sum()
-
-sampler = WeightedRandomSampler(
-    weights=weights,
-    num_samples=len(weights),
-    replacement=True
 )
 
 # Dataloaders
 trainloader = DataLoader(
-    trainset, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
+    trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 valloader = DataLoader(
     valset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
@@ -133,7 +119,7 @@ model = DeepARS4(
     n_layers=args.n_layers,
     dropout=args.dropout,
     prenorm=args.prenorm,
-    lr=0.0001
+    lr=args.kernel_lr
 )
 
 model = model.to(device)
@@ -205,7 +191,7 @@ optimizer, scheduler = setup_optimizer(
 ###############################################################################
 
 # Training
-def train(epoch: int, val_every: int = 10000):
+def train(epoch: int, val_every: int):
     model.train()
     train_loss = 0
     mae = 0
