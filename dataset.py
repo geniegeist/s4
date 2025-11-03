@@ -52,7 +52,6 @@ class TimeseriesDataset(torch.utils.data.Dataset):
         features = None
         if self.features is not None:
             features = self.features[h3_idx, start:start+self.context_length]
-            features = features.unsqueeze(-1)
 
         parts = [obs, tile_features, time_covariates]
         if features is not None:
