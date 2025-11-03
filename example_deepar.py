@@ -34,6 +34,7 @@ import argparse
 from models.s4.deepars4 import DeepARS4, NegativeBinomialNLL
 from models.s4.deepar import DeepAR
 from dataset import TimeseriesDataset
+from weighted_sampler import WeightedTileSampler
 
 from tqdm.auto import tqdm
 
@@ -82,6 +83,7 @@ timeseries = torch.load(args.data_dir + '/timeseries.pt')
 tile_features = torch.load(args.data_dir + '/tile_ft.pt')
 time_covariates = torch.load(args.data_dir + '/time_ft.pt')
 features = torch.load(args.data_dir + '/features.pt')
+tile_sample_weights = torch.load(args.data_dir + '/sample_weights.pt')
 
 d_input = 1 + tile_features.shape[1] + time_covariates.shape[1] + features.shape[2]
 
@@ -105,9 +107,16 @@ valset = TimeseriesDataset(
     context_length=args.context_length
 )
 
+sampler = WeightedTileSampler(
+    data_shape=timeseries_train.shape,
+    context_length=args.context_length,
+    h3_weights=tile_sample_weights,
+    num_samples=100000
+)
+
 # Dataloaders
 trainloader = DataLoader(
-    trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    trainset, batch_size=args.batch_size, sampler=sampler, num_workers=args.num_workers)
 valloader = DataLoader(
     valset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
